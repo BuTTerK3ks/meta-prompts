@@ -24,6 +24,9 @@ from configs.train_options import TrainOptions
 import glob
 import utils
 
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+
 metric_name = ['d1', 'd2', 'd3', 'abs_rel', 'sq_rel', 'rmse', 'rmse_log',
                'log10', 'silog']
 
@@ -105,7 +108,25 @@ def main():
     model_without_ddp = model
     #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
+    #TODO Replace dataset loading
 
+    # Define your data transformations if needed, e.g., resizing, cropping, normalization
+    transform = transforms.Compose([
+        transforms.Resize((args.crop_h, args.crop_w)),  # Assuming you want to resize images
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Example normalization
+    ])
+
+    # Load your training and validation datasets
+    train_dataset = datasets.ImageFolder(root=os.path.join(args.data_path, 'train'), transform=transform)
+    val_dataset = datasets.ImageFolder(root=os.path.join(args.data_path, 'val'), transform=transform)
+
+    # Create DataLoaders for your training and validation datasets
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,
+                              pin_memory=True, drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=True)
+
+    '''
     # Dataset setting
     dataset_kwargs = {'dataset_name': args.dataset, 'data_path': args.data_path}
     dataset_kwargs['crop_size'] = (args.crop_h, args.crop_w)
@@ -125,6 +146,7 @@ def main():
                                                pin_memory=True, drop_last=True)
     val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, sampler=sampler_val,
                                              pin_memory=True)
+    '''
 
     # Training settings
     criterion_d = SiLogLoss()
