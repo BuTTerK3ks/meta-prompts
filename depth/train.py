@@ -54,9 +54,14 @@ def main():
     args = opt.initialize().parse_args()
     print(args)
 
-    utils.init_distributed_mode_simple(args)
+    args.rank = 0
+    args.gpu = "cuda"
+
+    #TODO Changed distributed mode here
+    #utils.init_distributed_mode_simple(args)
     print(args)
     device = torch.device(args.gpu)
+
 
     pretrain = args.pretrained.split('.')[0]
     maxlrstr = str(args.max_lr).replace('.', '')
@@ -98,7 +103,7 @@ def main():
     cudnn.benchmark = True
     model.to(device)
     model_without_ddp = model
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+    #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
 
     # Dataset setting
