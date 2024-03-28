@@ -12,6 +12,7 @@ import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from tensorboardX import SummaryWriter
+from torch.utils.data import random_split
 
 from models_depth.model import MetaPromptDepth
 from models_depth.optimizer import build_optimizers
@@ -26,6 +27,8 @@ import utils
 
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
+
+from wecreateyour.load_dataset import ThreeDCDataset
 
 metric_name = ['d1', 'd2', 'd3', 'abs_rel', 'sq_rel', 'rmse', 'rmse_log',
                'log10', 'silog']
@@ -99,32 +102,36 @@ def main():
         log_txt = None
         log_dir = None
         
-    model = MetaPromptDepth(args=args)
+    #model = MetaPromptDepth(args=args)
 
     # CPU-GPU agnostic settings
     
     cudnn.benchmark = True
-    model.to(device)
-    model_without_ddp = model
+    #model.to(device)
+    #model_without_ddp = model
     #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+
 
     #TODO Replace dataset loading
 
-    # Define your data transformations if needed, e.g., resizing, cropping, normalization
-    transform = transforms.Compose([
-        transforms.Resize((args.crop_h, args.crop_w)),  # Assuming you want to resize images
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),  # Example normalization
-    ])
+    # Load own Dataset
+    crop_size = (args.crop_h, args.crop_w)
+    dataset = ThreeDCDataset(data_path="/home/grannemann/Allgemein/Christian/LOOXIS/data_2024", crop_size=crop_size)
 
-    # Load your training and validation datasets
-    train_dataset = datasets.ImageFolder(root=os.path.join(args.data_path, 'train'), transform=transform)
-    val_dataset = datasets.ImageFolder(root=os.path.join(args.data_path, 'val'), transform=transform)
+    # Splitting the dataset into train and validation sets
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
 
-    # Create DataLoaders for your training and validation datasets
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.workers,
-                              pin_memory=True, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=args.workers, pin_memory=True)
+    # Creating PyTorch data loaders for train and validation sets
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+
+    data_item3 = train_dataset[0]
+    data_item4 = val_dataset[0]
+
+
 
     '''
     # Dataset setting
@@ -133,6 +140,9 @@ def main():
 
     train_dataset = get_dataset(**dataset_kwargs)
     val_dataset = get_dataset(**dataset_kwargs, is_train=False)
+
+    data_item1 = train_dataset[0]
+    data_item2 = val_dataset[0]
 
     sampler_train = torch.utils.data.DistributedSampler(
         train_dataset, num_replicas=utils.get_world_size(), rank=args.rank, shuffle=True, 
@@ -144,9 +154,11 @@ def main():
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size,
                                                sampler=sampler_train, num_workers=args.workers, 
                                                pin_memory=True, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, sampler=sampler_val,
-                                             pin_memory=True)
+    #val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, sampler=sampler_val,pin_memory=True)
     '''
+
+
+
 
     # Training settings
     criterion_d = SiLogLoss()
