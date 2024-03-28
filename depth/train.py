@@ -24,6 +24,7 @@ from dataset.base_dataset import get_dataset
 from configs.train_options import TrainOptions
 import glob
 import utils
+from tqdm import tqdm
 
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
@@ -102,21 +103,21 @@ def main():
         log_txt = None
         log_dir = None
         
-    #model = MetaPromptDepth(args=args)
+    model = MetaPromptDepth(args=args)
 
     # CPU-GPU agnostic settings
     
     cudnn.benchmark = True
-    #model.to(device)
-    #model_without_ddp = model
+    model.to(device)
+    model_without_ddp = model
     #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
 
-    #TODO Replace dataset loading
+    #TODO Replaced dataset loading
 
     # Load own Dataset
     crop_size = (args.crop_h, args.crop_w)
-    dataset = ThreeDCDataset(data_path="/home/grannemann/Allgemein/Christian/LOOXIS/data_2024", crop_size=crop_size)
+    dataset = ThreeDCDataset(data_path="/media/grannemann/Externe SSD/data_2024/", crop_size=crop_size)
 
     # Splitting the dataset into train and validation sets
     train_size = int(0.8 * len(dataset))
@@ -127,9 +128,6 @@ def main():
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
-
-    data_item3 = train_dataset[0]
-    data_item4 = val_dataset[0]
 
 
 
@@ -237,7 +235,7 @@ def main():
 
 
 
-def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args):    
+def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args):
     global global_step
     model.train()
     if args.rank == 0:
@@ -245,18 +243,21 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
     half_epoch = args.epochs // 2
     iterations = len(train_loader)
     result_lines = []
-    for batch_idx, batch in enumerate(train_loader):      
+
+    # Wrap the training loader with tqdm for a progress bar
+    train_loader_tqdm = tqdm(enumerate(train_loader), total=iterations, desc=f"Epoch {epoch}/{args.epochs}")
+
+    for batch_idx, batch in train_loader_tqdm:
         global_step += 1
 
         if global_step < iterations * half_epoch:
-            current_lr = (args.max_lr - args.min_lr) * (global_step /
-                                            iterations/half_epoch) ** 0.9 + args.min_lr
+            current_lr = (args.max_lr - args.min_lr) * (global_step / iterations / half_epoch) ** 0.9 + args.min_lr
         else:
-            current_lr = max(args.min_lr, (args.min_lr - args.max_lr) * (global_step /
-                                            iterations/half_epoch - 1) ** 0.9 + args.max_lr)
+            current_lr = max(args.min_lr, (args.min_lr - args.max_lr) * (
+                        global_step / iterations / half_epoch - 1) ** 0.9 + args.max_lr)
 
         for param_group in optimizer.param_groups:
-            param_group['lr'] = current_lr*param_group['lr_scale']
+            param_group['lr'] = current_lr * param_group['lr_scale']
 
         input_RGB = batch['image'].to(device)
         depth_gt = batch['depth'].to(device)
@@ -275,29 +276,29 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
         if args.rank == 0:
             depth_loss.update(loss_d.item(), input_RGB.size(0))
+
         loss_d.backward()
-        
+        optimizer.step()
+
         if args.rank == 0:
-            if args.pro_bar:
-                logging.progress_bar(batch_idx, len(train_loader), args.epochs, epoch,
-                                    ('Depth Loss: %.4f (%.4f)' %
-                                    (depth_loss.val, depth_loss.avg)))
+            # Update the progress bar
+            train_loader_tqdm.set_postfix(
+                {'Depth Loss': f'{depth_loss.val:.4f} ({depth_loss.avg:.4f})', 'LR': f'{current_lr:.6f}'})
 
             if batch_idx % args.print_freq == 0:
                 result_line = 'Epoch: [{0}][{1}/{2}]\t' \
-                    'Loss: {loss}, LR: {lr}\n'.format(
-                        epoch, batch_idx, iterations,
-                        loss=depth_loss.avg, lr=current_lr
-                    )
+                              'Loss: {loss}, LR: {lr}\n'.format(
+                    epoch, batch_idx, iterations,
+                    loss=depth_loss.avg, lr=current_lr
+                )
                 result_lines.append(result_line)
                 print(result_line)
-        optimizer.step()
-    
+
     if args.rank == 0:
         with open(log_txt, 'a') as txtfile:
             txtfile.write('\nEpoch: %03d - %03d' % (epoch, args.epochs))
             for result_line in result_lines:
-                txtfile.write(result_line)   
+                txtfile.write(result_line)
 
     return loss_d
 

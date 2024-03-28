@@ -65,7 +65,7 @@ class ThreeDCDataset(Dataset):
         # Assuming the original image is in HxWxC format
         image_tensor = image_tensor.permute(2, 0, 1)
 
-        return {'image': image, 'depth': depth, 'filename': filename, 'class_id': class_id}
+        return {'image': image_tensor, 'depth': depth_tensor, 'filename': filename, 'class_id': class_id}
 
     def convert_10bit_rgba_to_8bit_rgb(self, image):
         # Assuming 'image' is a numpy array with shape (height, width, 4) and dtype=np.uint16
