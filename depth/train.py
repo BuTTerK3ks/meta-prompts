@@ -115,21 +115,27 @@ def main():
 
     #TODO Replaced dataset loading
 
-    # Load own Dataset
-    crop_size = (args.crop_h, args.crop_w)
-    dataset = ThreeDCDataset(data_path="/media/grannemann/Externe SSD/data_2024/", crop_size=crop_size)
+    # Function to load IDs from a text file
+    def load_ids_from_file(file_path):
+        with open(file_path, 'r') as file:
+            ids = [line.strip() for line in file]
+        return ids
 
-    # Splitting the dataset into train and validation sets
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    dataset_path = '/home/grannemann/Allgemein/Christian/LOOXIS/wecreateyour'
 
-    # Creating PyTorch data loaders for train and validation sets
+    # Load training and validation IDs
+    train_ids = load_ids_from_file(os.path.join(dataset_path, 'face_detection', 'train.txt'))
+    val_ids = load_ids_from_file(os.path.join(dataset_path, 'face_detection', 'val.txt'))
 
+    crop_size = (448, 576)
+
+    # Initialize datasets with specific splits
+    train_dataset = ThreeDCDataset(data_path=dataset_path, ids=train_ids, crop_size=crop_size)
+    val_dataset = ThreeDCDataset(data_path=dataset_path, ids=val_ids, crop_size=crop_size)
+
+    # Creating PyTorch data loaders for the train and validation sets
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
-
-
 
     '''
     # Dataset setting
