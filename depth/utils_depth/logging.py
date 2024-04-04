@@ -8,7 +8,7 @@ import cv2
 import sys
 import time
 import numpy as np
-
+import shutil
 import torch
 
 
@@ -18,7 +18,11 @@ begin_time = last_time
 
 
 def progress_bar(current, total, epochs, cur_epoch, msg=None):
-    _, term_width = os.popen('stty size', 'r').read().split()
+    if sys.stdin.isatty():
+        _, term_width = os.popen('stty size', 'r').read().split()
+        term_width = int(term_width)
+    else:
+        term_width = 80  # Fallback/default terminal width
     term_width = int(term_width)
     global last_time, begin_time
     if current == 0:

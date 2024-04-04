@@ -50,7 +50,7 @@ class ThreeDCDataset(Dataset):
         # Convert numpy arrays to PyTorch tensors
         image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize image
         mask_tensor = torch.from_numpy(mask).long()  # Masks are typically long type
-        depth_tensor = torch.from_numpy(depth).float() / 1000
+        depth_tensor = torch.from_numpy(depth).float() / 100
 
         # Permute tensors to match PyTorch's NCHW format
         image_tensor = image_tensor.permute(2, 0, 1)

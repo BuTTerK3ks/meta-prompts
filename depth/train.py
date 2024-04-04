@@ -12,7 +12,6 @@ import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from tensorboardX import SummaryWriter
-from torch.utils.data import random_split
 
 from models_depth.model import MetaPromptDepth
 from models_depth.optimizer import build_optimizers
@@ -61,8 +60,11 @@ def main():
     args = opt.initialize().parse_args()
     print(args)
 
+    #TODO Self set
     args.rank = 0
     args.gpu = "cuda"
+    args.shift_window_test=False
+    args.pro_bar=True
 
     #TODO Changed distributed mode here
     #utils.init_distributed_mode_simple(args)
@@ -134,35 +136,8 @@ def main():
     val_dataset = ThreeDCDataset(data_path=dataset_path, ids=val_ids, crop_size=crop_size)
 
     # Creating PyTorch data loaders for the train and validation sets
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
-
-    '''
-    # Dataset setting
-    dataset_kwargs = {'dataset_name': args.dataset, 'data_path': args.data_path}
-    dataset_kwargs['crop_size'] = (args.crop_h, args.crop_w)
-
-    train_dataset = get_dataset(**dataset_kwargs)
-    val_dataset = get_dataset(**dataset_kwargs, is_train=False)
-
-    data_item1 = train_dataset[0]
-    data_item2 = val_dataset[0]
-
-    sampler_train = torch.utils.data.DistributedSampler(
-        train_dataset, num_replicas=utils.get_world_size(), rank=args.rank, shuffle=True, 
-    )
-
-    sampler_val = torch.utils.data.DistributedSampler(
-            val_dataset, num_replicas=utils.get_world_size(), rank=args.rank, shuffle=False)
-
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=args.batch_size,
-                                               sampler=sampler_train, num_workers=args.workers, 
-                                               pin_memory=True, drop_last=True)
-    #val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=1, sampler=sampler_val,pin_memory=True)
-    '''
-
-
-
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, prefetch_factor=5)
+    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=4, prefetch_factor=5)
 
     # Training settings
     criterion_d = SiLogLoss()
@@ -267,6 +242,7 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
         input_RGB = batch['image'].to(device)
         depth_gt = batch['depth'].to(device)
+        mask = batch['mask'].to(device)
         class_ids = None
         if 'class_id' in batch:
             class_ids = batch['class_id']
@@ -275,9 +251,16 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
         optimizer.zero_grad()
         pred_value = list(preds.values())
         loss_d = 0
-        for i in pred_value:
-            loss_d += criterion_d(i.squeeze(dim=1), depth_gt)
-        loss_d = loss_d / len(pred_value)
+        # Iterate over your predictions if they are in a list or dict
+        for pred in pred_value:
+            # Apply the mask: element-wise multiplication of the mask with the loss map
+            # The mask should be 1 for relevant pixels and 0 for irrelevant ones
+            unmasked_loss = criterion_d(pred.squeeze(dim=1), depth_gt)
+            masked_loss = unmasked_loss * mask  # Apply mask here
+            loss_d += masked_loss.sum()
+        # Normalize the loss by the number of predictions and by the sum of the mask values
+        # to account for the actual number of relevant pixels
+        loss_d = loss_d / len(pred_value) / mask.sum()
         # loss_d = criterion_d(preds['pred_d'].squeeze(dim=1), depth_gt)
 
         if args.rank == 0:
@@ -324,6 +307,7 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
     for batch_idx, batch in enumerate(val_loader):
         input_RGB = batch['image'].to(device)
         depth_gt = batch['depth'].to(device)
+        mask = batch['mask'].to(device)
         filename = batch['filename'][0]
         class_id = None
         if 'class_id' in batch:
@@ -362,10 +346,23 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
                 pred_s[..., :, i*interval:i*interval+h] += pred_d[i:i+1]
             pred_d = pred_s/sliding_masks
 
+        pred_d = pred_d * mask
+        depth_gt = depth_gt * mask
+
+        depth_gt_numpy = depth_gt.cpu().numpy()
+        pred_d_numpy = pred_d.cpu().numpy()
+
         pred_d = pred_d.squeeze()
         depth_gt = depth_gt.squeeze()
 
-        loss_d = criterion_d(pred_d.squeeze(), depth_gt)
+
+
+        unmasked_loss = criterion_d(pred_d.squeeze(), depth_gt)
+        masked_loss = unmasked_loss * mask  # Apply mask here
+        masked_loss = masked_loss.sum()
+        loss_d = masked_loss / len(pred_value) / mask.sum()
+
+
 
         ddp_logger.update(loss_d=loss_d.item())
 
@@ -377,19 +374,16 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
 
         if args.rank == 0:
             save_path = os.path.join(result_dir, filename)
-
-            if save_path.split('.')[-1] == 'jpg':
-                save_path = save_path.replace('jpg', 'png')
+            save_path = save_path + '.npy'  # Ensuring the file is saved with .npy extension
 
             if args.save_result:
-                if args.dataset == 'kitti':
-                    pred_d_numpy = pred_d.cpu().numpy() * 256.0
-                    cv2.imwrite(save_path, pred_d_numpy.astype(np.uint16),
-                                [cv2.IMWRITE_PNG_COMPRESSION, 0])
-                else:
-                    pred_d_numpy = pred_d.cpu().numpy() * 1000.0
-                    cv2.imwrite(save_path, pred_d_numpy.astype(np.uint16),
-                                [cv2.IMWRITE_PNG_COMPRESSION, 0])
+                # Convert the tensor to a NumPy array
+                pred_d_numpy = pred_d.cpu().numpy()
+
+                pred_d_numpy = pred_d_numpy * 100
+
+                # Save the NumPy array to a .npy file
+                np.save(save_path, pred_d_numpy)
                     
         if args.rank == 0:
             loss_d = depth_loss.avg
