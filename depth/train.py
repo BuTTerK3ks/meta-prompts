@@ -255,7 +255,9 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
         for pred in pred_value:
             # Apply the mask: element-wise multiplication of the mask with the loss map
             # The mask should be 1 for relevant pixels and 0 for irrelevant ones
-            unmasked_loss = criterion_d(pred.squeeze(dim=1), depth_gt)
+            pred = pred.squeeze(dim=1) * mask
+            depth_gt = depth_gt * mask
+            unmasked_loss = criterion_d(pred, depth_gt)
             masked_loss = unmasked_loss * mask  # Apply mask here
             loss_d += masked_loss.sum()
         # Normalize the loss by the number of predictions and by the sum of the mask values
