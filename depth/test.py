@@ -94,6 +94,7 @@ def validate(val_loader, model, device, args):
     for batch_idx, batch in enumerate(val_loader):
         input_RGB = batch['image'].to(device)
         depth_gt = batch['depth'].to(device)
+        mask = batch['mask'].to(device)
         filename = batch['filename'][0]
         # class_id = batch['class_id']
 
@@ -129,7 +130,7 @@ def validate(val_loader, model, device, args):
         pred_d = pred_d.squeeze()
         depth_gt = depth_gt.squeeze()
 
-        pred_crop, gt_crop = metrics.cropping_img(args, pred_d, depth_gt)
+        pred_crop, gt_crop = metrics.cropping_img(args, pred_d, depth_gt, mask)
         computed_result = metrics.eval_depth(pred_crop, gt_crop)
     
         if args.save_eval_pngs:

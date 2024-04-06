@@ -12,6 +12,8 @@ import torch
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
 from tensorboardX import SummaryWriter
+import matplotlib.pyplot as plt
+
 
 from models_depth.model import MetaPromptDepth
 from models_depth.optimizer import build_optimizers
@@ -129,11 +131,11 @@ def main():
     train_ids = load_ids_from_file(os.path.join(dataset_path, 'face_detection', 'train.txt'))
     val_ids = load_ids_from_file(os.path.join(dataset_path, 'face_detection', 'val.txt'))
 
-    crop_size = (448, 576)
+    resize_size = (512, 512)
 
     # Initialize datasets with specific splits
-    train_dataset = ThreeDCDataset(data_path=dataset_path, ids=train_ids, crop_size=crop_size)
-    val_dataset = ThreeDCDataset(data_path=dataset_path, ids=val_ids, crop_size=crop_size)
+    train_dataset = ThreeDCDataset(data_path=dataset_path, ids=train_ids, resize_size=resize_size)
+    val_dataset = ThreeDCDataset(data_path=dataset_path, ids=val_ids, resize_size=resize_size)
 
     # Creating PyTorch data loaders for the train and validation sets
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, prefetch_factor=5)
@@ -214,7 +216,29 @@ def main():
                     },
                     os.path.join(log_dir, 'best.ckpt'))
 
+def visualize_image(input_RGB, index=0):
+    """
+    Visualize an image from a batch.
 
+    Parameters:
+    - input_RGB: a batch of images as a PyTorch tensor.
+    - index: index of the image in the batch to visualize.
+    """
+    if input_RGB.dim() == 4:  # Check if the input tensor is in the format [B, C, H, W]
+        image = input_RGB[index]  # Select the image at the specified index
+    else:
+        raise ValueError("Input tensor is not in the expected [B, C, H, W] format")
+
+    # Convert the image from PyTorch tensor to a NumPy array and change the channel order from [C, H, W] to [H, W, C]
+    image = image.cpu().numpy().transpose(1, 2, 0)
+
+    # If the image data is normalized, you might need to denormalize it (e.g., multiply by the standard deviation and add the mean for each channel)
+    # For simplicity, this step is not included here.
+
+    # Display the image
+    plt.imshow(image)
+    plt.axis('off')  # Turn off axis labels and ticks
+    plt.show()
 
 def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args):
     global global_step
@@ -241,7 +265,11 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
             param_group['lr'] = current_lr * param_group['lr_scale']
 
         input_RGB = batch['image'].to(device)
+
+        #visualize_image(input_RGB, index=0)
+
         depth_gt = batch['depth'].to(device)
+        #print(np.max(batch['depth'].numpy()[0]))
         mask = batch['mask'].to(device)
         class_ids = None
         if 'class_id' in batch:
@@ -350,9 +378,6 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
 
         pred_d = pred_d * mask
         depth_gt = depth_gt * mask
-
-        depth_gt_numpy = depth_gt.cpu().numpy()
-        pred_d_numpy = pred_d.cpu().numpy()
 
         pred_d = pred_d.squeeze()
         depth_gt = depth_gt.squeeze()

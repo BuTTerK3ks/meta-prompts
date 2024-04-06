@@ -32,7 +32,7 @@ def eval_depth(pred, target):
             'log10':log10.item(), 'silog':silog.item()}
 
 
-def cropping_img(args, pred, gt_depth):
+def cropping_img(args, pred, gt_depth, mask):
     min_depth_eval = args.min_depth_eval
 
     max_depth_eval = args.max_depth_eval
@@ -42,6 +42,7 @@ def cropping_img(args, pred, gt_depth):
 
     valid_mask = torch.logical_and(
         gt_depth > min_depth_eval, gt_depth < max_depth_eval)
+
 
     if args.dataset == 'kitti':
         if args.do_kb_crop:
@@ -70,6 +71,7 @@ def cropping_img(args, pred, gt_depth):
         eval_mask = torch.zeros(valid_mask.shape).to(device=valid_mask.device)
         eval_mask[45:471, 41:601] = 1
     else:
+        valid_mask = valid_mask * mask
         eval_mask = valid_mask
 
     valid_mask = torch.logical_and(valid_mask, eval_mask)

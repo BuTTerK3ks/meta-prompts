@@ -5,16 +5,16 @@ from torch.utils.data import Dataset
 import cv2
 
 class ThreeDCDataset(Dataset):
-    def __init__(self, data_path, ids, crop_size=(448, 576), is_train=True):
+    def __init__(self, data_path, ids, resize_size=(448, 576), is_train=True):
         """
         Args:
             data_path (string): Path to the directory with all the data.
             split_file (string): Path to the text file containing IDs for validation/test split.
-            crop_size (tuple, optional): Desired output size. Default is (448, 576).
+            resize_size (tuple, optional): Desired output size. Default is (448, 576).
             is_train (bool): Flag to indicate if the dataset is used for training. Default is True.
         """
         self.data_path = data_path
-        self.crop_size = crop_size
+        self.resize_size = resize_size
         self.is_train = is_train
 
         # List of filenames for images, masks, and depth
@@ -41,16 +41,41 @@ class ThreeDCDataset(Dataset):
         mask = np.load(mask_path)
         depth = np.load(depth_path)
 
-        # Assuming the images are already in RGB format
-        if self.crop_size:
-            image = cv2.resize(image, self.crop_size)
-            mask = cv2.resize(mask, self.crop_size, interpolation=cv2.INTER_NEAREST)  # Use nearest interpolation for masks
-            depth = cv2.resize(depth, self.crop_size)
+        # Load image, mask, and depth
+        image = np.load(image_path)
+        mask = np.load(mask_path)
+        depth = np.load(depth_path)
 
+        if self.resize_size:
+            # Resize while keeping aspect ratio
+            def resize_keep_aspect(image, target_size, fill_value=0):
+                ih, iw = image.shape[:2]
+                th, tw = target_size
+                scale = min(tw / iw, th / ih)
+
+                nw = int(iw * scale)
+                nh = int(ih * scale)
+
+                image_resized = cv2.resize(image, (nw, nh))
+
+                if len(image.shape) == 3:  # For RGB images
+                    new_image = np.full((th, tw, 3), fill_value, dtype=image.dtype)
+                else:  # For masks and depth maps
+                    new_image = np.full((th, tw), fill_value, dtype=image.dtype)
+
+                new_image[(th - nh) // 2:(th - nh) // 2 + nh, (tw - nw) // 2:(tw - nw) // 2 + nw] = image_resized
+                return new_image
+
+            image = resize_keep_aspect(image, self.resize_size)
+            mask = resize_keep_aspect(mask, self.resize_size, fill_value=0)  # Change fill_value if needed
+            depth = resize_keep_aspect(depth, self.resize_size)
+
+        # Normalize depth to range 0-10
+        depth = depth / depth.max() * 10
         # Convert numpy arrays to PyTorch tensors
         image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize image
         mask_tensor = torch.from_numpy(mask).long()  # Masks are typically long type
-        depth_tensor = torch.from_numpy(depth).float() / 100
+        depth_tensor = torch.from_numpy(depth).float()
 
         # Permute tensors to match PyTorch's NCHW format
         image_tensor = image_tensor.permute(2, 0, 1)
