@@ -43,6 +43,9 @@ def cropping_img(args, pred, gt_depth, mask):
     valid_mask = torch.logical_and(
         gt_depth > min_depth_eval, gt_depth < max_depth_eval)
 
+    # make mask boolean and remove first dimension
+    mask = mask.squeeze(0)
+    mask = mask > 0
 
     if args.dataset == 'kitti':
         if args.do_kb_crop:
@@ -70,8 +73,12 @@ def cropping_img(args, pred, gt_depth, mask):
     elif args.dataset == 'nyudepthv2':
         eval_mask = torch.zeros(valid_mask.shape).to(device=valid_mask.device)
         eval_mask[45:471, 41:601] = 1
-    else:
+
+    elif args.dataset == 'wecreateyour':
         valid_mask = valid_mask * mask
+        eval_mask = valid_mask
+
+    else:
         eval_mask = valid_mask
 
     valid_mask = torch.logical_and(valid_mask, eval_mask)
