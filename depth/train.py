@@ -66,7 +66,7 @@ def main():
     args.rank = 0
     args.gpu = "cuda"
     args.shift_window_test=False
-    args.pro_bar=True
+    args.pro_bar=False
 
     #TODO Changed distributed mode here
     #utils.init_distributed_mode_simple(args)
@@ -240,6 +240,50 @@ def visualize_image(input_RGB, index=0):
     plt.axis('off')  # Turn off axis labels and ticks
     plt.show()
 
+
+def get_exponential_decay_lr(global_step, iterations, half_epoch, max_lr, min_lr):
+    """
+    Calculate the learning rate based on a custom exponential decay schedule.
+
+    :param global_step: Current step in the training process.
+    :param iterations: Total number of iterations per epoch.
+    :param half_epoch: Midpoint of the epoch in terms of iterations, used to define the total decay length.
+    :param max_lr: Maximum learning rate at the start of training.
+    :param min_lr: Minimum learning rate after decay.
+    :return: The calculated current learning rate.
+    """
+    total_decay_steps = iterations * half_epoch * 2  # Total steps over which decay should happen
+    decay_rate = (min_lr / max_lr) ** (1 / total_decay_steps)  # Calculate decay rate for exponential decay
+
+    # Calculate the decayed learning rate
+    decayed_lr = max_lr * (decay_rate ** global_step)
+
+    # Ensure learning rate does not fall below min_lr
+    current_lr = max(min_lr, decayed_lr)
+
+    return current_lr
+
+
+def get_custom_lr(global_step, iterations, half_epoch, max_lr, min_lr):
+    """
+    Calculate the learning rate based on a custom piecewise schedule with polynomial changes.
+
+    :param global_step: Current step in the training process.
+    :param iterations: Total number of iterations per epoch.
+    :param half_epoch: Defines the midpoint of the epoch in terms of iterations for the schedule change.
+    :param max_lr: Maximum learning rate.
+    :param min_lr: Minimum learning rate.
+    :return: The calculated current learning rate.
+    """
+    if global_step < iterations * half_epoch:
+        current_lr = (max_lr - min_lr) * (global_step / (iterations * half_epoch)) ** 0.9 + min_lr
+    else:
+        current_lr = max(min_lr, (min_lr - max_lr) * ((global_step / (iterations * half_epoch)) - 1) ** 0.9 + max_lr)
+
+    return current_lr
+
+
+
 def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args):
     global global_step
     model.train()
@@ -255,11 +299,9 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
     for batch_idx, batch in train_loader_tqdm:
         global_step += 1
 
-        if global_step < iterations * half_epoch:
-            current_lr = (args.max_lr - args.min_lr) * (global_step / iterations / half_epoch) ** 0.9 + args.min_lr
-        else:
-            current_lr = max(args.min_lr, (args.min_lr - args.max_lr) * (
-                        global_step / iterations / half_epoch - 1) ** 0.9 + args.max_lr)
+        #current_lr = get_custom_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
+        current_lr = get_exponential_decay_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
+
 
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr * param_group['lr_scale']
@@ -396,7 +438,7 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
         if args.rank == 0:
             depth_loss.update(loss_d.item(), input_RGB.size(0))
 
-        pred_crop, gt_crop = metrics.cropping_img(args, pred_d, depth_gt)
+        pred_crop, gt_crop = metrics.cropping_img(args, pred_d, depth_gt, mask)
         computed_result = metrics.eval_depth(pred_crop, gt_crop)
 
         if args.rank == 0:
