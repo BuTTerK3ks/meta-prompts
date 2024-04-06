@@ -449,7 +449,7 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
                 # Convert the tensor to a NumPy array
                 pred_d_numpy = pred_d.cpu().numpy()
 
-                pred_d_numpy = pred_d_numpy * 100
+                pred_d_numpy = pred_d_numpy
 
                 # Save the NumPy array to a .npy file
                 np.save(save_path, pred_d_numpy)
