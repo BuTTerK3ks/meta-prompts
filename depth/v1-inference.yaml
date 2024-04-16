@@ -2,6 +2,7 @@ model:
   base_learning_rate: 1.0e-04
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
+    ignore_keys: ['first_stage_model.encoder.conv_in.weight']
     linear_start: 0.00085
     linear_end: 0.0120
     num_timesteps_cond: 1
@@ -11,7 +12,7 @@ model:
     cond_stage_key: "txt"
     image_size: 64
     channels: 4
-    cond_stage_trainable: false   # Note: different from the one we trained before
+    cond_stage_trainable: true   # Note: different from the one we trained before
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
@@ -40,7 +41,7 @@ model:
         use_spatial_transformer: True
         transformer_depth: 1
         context_dim: 768
-        use_checkpoint: True
+        use_checkpoint: False
         legacy: False
 
     first_stage_config:

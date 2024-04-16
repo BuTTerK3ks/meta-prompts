@@ -150,7 +150,8 @@ def main():
 
     start_ep = 1
     if args.resume_from:
-        load_model(args.resume_from, model.module, optimizer)
+        # TODO Changed for single threading
+        load_model(args.resume_from, model, optimizer)
         strlength = len('_model.ckpt')
         resume_ep = int(args.resume_from[-strlength-2:-strlength])
         print(f'resumed from epoch {resume_ep}, ckpt {args.resume_from}')

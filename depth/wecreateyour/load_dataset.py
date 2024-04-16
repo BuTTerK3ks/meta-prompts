@@ -41,10 +41,8 @@ class ThreeDCDataset(Dataset):
         mask = np.load(mask_path)
         depth = np.load(depth_path)
 
-        # Load image, mask, and depth
-        image = np.load(image_path)
-        mask = np.load(mask_path)
-        depth = np.load(depth_path)
+        # Convert image to greyscale
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
         if self.resize_size:
             # Resize while keeping aspect ratio
@@ -58,10 +56,7 @@ class ThreeDCDataset(Dataset):
 
                 image_resized = cv2.resize(image, (nw, nh))
 
-                if len(image.shape) == 3:  # For RGB images
-                    new_image = np.full((th, tw, 3), fill_value, dtype=image.dtype)
-                else:  # For masks and depth maps
-                    new_image = np.full((th, tw), fill_value, dtype=image.dtype)
+                new_image = np.full((th, tw), fill_value, dtype=image.dtype)  # Greyscale image is 2D
 
                 new_image[(th - nh) // 2:(th - nh) // 2 + nh, (tw - nw) // 2:(tw - nw) // 2 + nw] = image_resized
                 return new_image
@@ -73,12 +68,12 @@ class ThreeDCDataset(Dataset):
         # Normalize depth to range 0-10
         depth = depth / depth.max() * 10
         # Convert numpy arrays to PyTorch tensors
-        image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize image
+        image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize greyscale image
         mask_tensor = torch.from_numpy(mask).long()  # Masks are typically long type
         depth_tensor = torch.from_numpy(depth).float()
 
         # Permute tensors to match PyTorch's NCHW format
-        image_tensor = image_tensor.permute(2, 0, 1)
-        #depth_tensor = depth_tensor.unsqueeze(0)  # Add channel dimension to depth
+        # Since image is now greyscale, no need to permute dimensions, just add channel dimension
+        image_tensor = image_tensor.unsqueeze(0)
 
         return {'image': image_tensor, 'mask': mask_tensor, 'depth': depth_tensor, 'filename': base_filename}
