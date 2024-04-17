@@ -31,9 +31,9 @@ class MetaPromptDepthEncoder(nn.Module):
         nn.GroupNorm(16, ldm_prior[0]),
         nn.ReLU(),
         )
-        self.layer2 = Decoder(ldm_prior[1], ldm_prior[1], 1, [32], [4])
-        self.layer3 = Decoder(ldm_prior[2], ldm_prior[2], 2, [32, 32], [4, 4])
-        self.layer4 = Decoder(ldm_prior[3], ldm_prior[3], 3, [32, 32, 32], [4, 4, 4])
+        self.layer2 = Decoder(ldm_prior[1], ldm_prior[1], 1, [32], [5])
+        self.layer3 = Decoder(ldm_prior[2], ldm_prior[2], 2, [32, 32], [5, 5])
+        self.layer4 = Decoder(ldm_prior[3], ldm_prior[3], 3, [32, 32, 32], [5, 5, 5])
 
         self.out_layer = nn.Sequential(
             nn.Conv2d(sum(ldm_prior), text_dim, 3, 1, 1),
@@ -174,17 +174,11 @@ class Decoder(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-    #TODO Besseres Vorgehen nötig!!
+    #TODO Check if even Kernel Size is good
     def forward(self, x):
         x = x[0]
         out = self.deconv_layers(x)
         out = self.conv_layers(out)
-        size_factor = out.size(dim=3)
-        if size_factor == 519:
-            size_factor = 512
-        else:
-            size_factor = 72
-        out = F.interpolate(out, size=(size_factor, size_factor), mode='bilinear', align_corners=False)
         return out
 
     def _make_deconv_layer(self, num_layers, num_filters, num_kernels):
