@@ -41,11 +41,6 @@ class ThreeDCDataset(Dataset):
         mask = np.load(mask_path)
         depth = np.load(depth_path)
 
-        # Load image, mask, and depth
-        image = np.load(image_path)
-        mask = np.load(mask_path)
-        depth = np.load(depth_path)
-
         if self.resize_size:
             # Resize while keeping aspect ratio
             def resize_keep_aspect(image, target_size, fill_value=0):

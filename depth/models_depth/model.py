@@ -31,9 +31,9 @@ class MetaPromptDepthEncoder(nn.Module):
         nn.GroupNorm(16, ldm_prior[0]),
         nn.ReLU(),
         )
-        self.layer2 = Decoder(ldm_prior[1], ldm_prior[1], 1, [32], [4])
-        self.layer3 = Decoder(ldm_prior[2], ldm_prior[2], 2, [32, 32], [4, 4])
-        self.layer4 = Decoder(ldm_prior[3], ldm_prior[3], 3, [32, 32, 32], [4, 4, 4])
+        self.layer2 = Decoder(ldm_prior[1], ldm_prior[1], 1, [32], [3])
+        self.layer3 = Decoder(ldm_prior[2], ldm_prior[2], 2, [32, 32], [3, 3])
+        self.layer4 = Decoder(ldm_prior[3], ldm_prior[3], 3, [32, 32, 32], [3, 3, 3])
 
         self.out_layer = nn.Sequential(
             nn.Conv2d(sum(ldm_prior), text_dim, 3, 1, 1),
@@ -150,7 +150,77 @@ class MetaPromptDepth(nn.Module):
         return out_dict
 
 
+
 class Decoder(nn.Module):
+    def __init__(self, in_channels, out_channels, num_deconv, num_filters, deconv_kernels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.deconv_layers = self._make_deconv_layer(
+            num_deconv,
+            num_filters,
+            deconv_kernels
+        )
+
+        # Final convolutional layers to adjust channel dimensions and add non-linearity
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(
+                in_channels=num_filters[-1],
+                out_channels=out_channels,
+                kernel_size=3,
+                stride=1,
+                padding=1
+            ),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    #TODO Check if even Kernel Size is good
+    def forward(self, x):
+        x = x[0]
+        out = self.deconv_layers(x)
+        out = self.conv_layers(out)
+        return out
+
+    def _make_deconv_layer(self, num_layers, num_filters, num_kernels):
+        """Make deconv layers using upsampling followed by convolution to avoid checkerboard artifacts."""
+        layers = []
+        in_planes = self.in_channels
+        for i in range(num_layers):
+            kernel = num_kernels[i]
+            planes = num_filters[i]
+
+            # Upsample layer: Scale factor of 2 for upsampling
+            layers.append(nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False))
+
+            # Convolution layer
+            layers.append(nn.Conv2d(
+                in_channels=in_planes,
+                out_channels=planes,
+                kernel_size=kernel,
+                stride=1,  # stride is 1 since upsampling handles the spatial size increase
+                padding=kernel // 2,  # padding to maintain size (assuming kernel size is odd)
+                bias=False
+            ))
+            layers.append(nn.BatchNorm2d(planes))
+            layers.append(nn.ReLU(inplace=True))
+            in_planes = planes
+
+        return nn.Sequential(*layers)
+
+    def init_weights(self):
+        """Initialize model weights."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.normal_(m.weight, std=0.001)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+
+
+class Decoder_old(nn.Module):
     def __init__(self, in_channels, out_channels, num_deconv, num_filters, deconv_kernels):
         super().__init__()
         self.deconv = num_deconv
