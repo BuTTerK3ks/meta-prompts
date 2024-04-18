@@ -31,9 +31,9 @@ class MetaPromptDepthEncoder(nn.Module):
         nn.GroupNorm(16, ldm_prior[0]),
         nn.ReLU(),
         )
-        self.layer2 = Decoder(ldm_prior[1], ldm_prior[1], 1, [32], [5])
-        self.layer3 = Decoder(ldm_prior[2], ldm_prior[2], 2, [32, 32], [5, 5])
-        self.layer4 = Decoder(ldm_prior[3], ldm_prior[3], 3, [32, 32, 32], [5, 5, 5])
+        self.layer2 = Decoder(ldm_prior[1], ldm_prior[1], 1, [32], [3])
+        self.layer3 = Decoder(ldm_prior[2], ldm_prior[2], 2, [32, 32], [3, 3])
+        self.layer4 = Decoder(ldm_prior[3], ldm_prior[3], 3, [32, 32, 32], [3, 3, 3])
 
         self.out_layer = nn.Sequential(
             nn.Conv2d(sum(ldm_prior), text_dim, 3, 1, 1),
