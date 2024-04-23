@@ -32,48 +32,54 @@ class ThreeDCDataset(Dataset):
 
     def __getitem__(self, idx):
         base_filename = self.ids[idx]
-        image_path = os.path.join(self.data_path, 'image_numpy', base_filename + '.npy')
-        mask_path = os.path.join(self.data_path, 'mask_numpy', base_filename + '.npy')
-        depth_path = os.path.join(self.data_path, 'depth_numpy', base_filename + '.npy')
+        try:
+            image_path = os.path.join(self.data_path, 'image_numpy', base_filename + '.npy')
+            mask_path = os.path.join(self.data_path, 'mask_numpy', base_filename + '.npy')
+            depth_path = os.path.join(self.data_path, 'depth_numpy', base_filename + '.npy')
 
-        # Load image, mask, and depth
-        image = np.load(image_path)
-        mask = np.load(mask_path)
-        depth = np.load(depth_path)
+            # Load image, mask, and depth
+            image = np.load(image_path)
+            mask = np.load(mask_path)
+            depth = np.load(depth_path)
 
-        if self.resize_size:
-            # Resize while keeping aspect ratio
-            def resize_keep_aspect(image, target_size, fill_value=0):
-                ih, iw = image.shape[:2]
-                th, tw = target_size
-                scale = min(tw / iw, th / ih)
+            if self.resize_size:
+                # Resize while keeping aspect ratio
+                def resize_keep_aspect(image, target_size, fill_value=0):
+                    ih, iw = image.shape[:2]
+                    th, tw = target_size
+                    scale = min(tw / iw, th / ih)
 
-                nw = int(iw * scale)
-                nh = int(ih * scale)
+                    nw = int(iw * scale)
+                    nh = int(ih * scale)
 
-                image_resized = cv2.resize(image, (nw, nh))
+                    image_resized = cv2.resize(image, (nw, nh))
 
-                if len(image.shape) == 3:  # For RGB images
-                    new_image = np.full((th, tw, 3), fill_value, dtype=image.dtype)
-                else:  # For masks and depth maps
-                    new_image = np.full((th, tw), fill_value, dtype=image.dtype)
+                    if len(image.shape) == 3:  # For RGB images
+                        new_image = np.full((th, tw, 3), fill_value, dtype=image.dtype)
+                    else:  # For masks and depth maps
+                        new_image = np.full((th, tw), fill_value, dtype=image.dtype)
 
-                new_image[(th - nh) // 2:(th - nh) // 2 + nh, (tw - nw) // 2:(tw - nw) // 2 + nw] = image_resized
-                return new_image
+                    new_image[(th - nh) // 2:(th - nh) // 2 + nh, (tw - nw) // 2:(tw - nw) // 2 + nw] = image_resized
+                    return new_image
 
-            image = resize_keep_aspect(image, self.resize_size)
-            mask = resize_keep_aspect(mask, self.resize_size, fill_value=0)  # Change fill_value if needed
-            depth = resize_keep_aspect(depth, self.resize_size)
+                image = resize_keep_aspect(image, self.resize_size)
+                mask = resize_keep_aspect(mask, self.resize_size, fill_value=0)  # Change fill_value if needed
+                depth = resize_keep_aspect(depth, self.resize_size)
 
-        # Normalize depth to range 0-10
-        depth = depth / depth.max() * 10
-        # Convert numpy arrays to PyTorch tensors
-        image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize image
-        mask_tensor = torch.from_numpy(mask).long()  # Masks are typically long type
-        depth_tensor = torch.from_numpy(depth).float()
+            # Normalize depth to range 0-10
+            depth = depth / depth.max() * 10
+            # Convert numpy arrays to PyTorch tensors
+            image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize image
+            mask_tensor = torch.from_numpy(mask).long()  # Masks are typically long type
+            depth_tensor = torch.from_numpy(depth).float()
 
-        # Permute tensors to match PyTorch's NCHW format
-        image_tensor = image_tensor.permute(2, 0, 1)
-        #depth_tensor = depth_tensor.unsqueeze(0)  # Add channel dimension to depth
+            # Permute tensors to match PyTorch's NCHW format
+            image_tensor = image_tensor.permute(2, 0, 1)
+            #depth_tensor = depth_tensor.unsqueeze(0)  # Add channel dimension to depth
 
-        return {'image': image_tensor, 'mask': mask_tensor, 'depth': depth_tensor, 'filename': base_filename}
+            return {'image': image_tensor, 'mask': mask_tensor, 'depth': depth_tensor, 'filename': base_filename}
+
+        except:
+
+            print("Error loading file: " + str(base_filename))
+            return self.__getitem__((idx + 1) % len(self))
