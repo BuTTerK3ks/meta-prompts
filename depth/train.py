@@ -64,7 +64,7 @@ def main():
 
     #TODO Self set
     args.rank = 0
-    args.gpu = "cuda"
+    args.gpu = "cuda:1"
     args.shift_window_test=False
     args.pro_bar=False
 
@@ -109,12 +109,20 @@ def main():
         
     model = MetaPromptDepth(args=args)
 
+
     # CPU-GPU agnostic settings
+    if torch.cuda.device_count() > 1:
+        model.encoder.to('cuda:1')
+        model.decoder.to('cuda:1')
+        model.last_layer_depth.to('cuda:1')  # Assuming you want to keep processing sequential here
+    else:
+        model.to('cuda:0')  # Fallback to a single GPU or CPU
+
+
     
     cudnn.benchmark = True
 
-    # Split model on gpus
-    model.to(device)
+
     model_without_ddp = model
     #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
 
@@ -314,6 +322,7 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
         current_lr = get_exponential_decay_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr * param_group['lr_scale']
+        device = "cuda:1"
 
         input_RGB = batch['image'].to(device)
         depth_gt = batch['depth'].to(device)

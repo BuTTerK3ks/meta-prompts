@@ -80,8 +80,14 @@ class MetaPromptDepthEncoder(nn.Module):
 
     def forward(self, x):
         img = x
+        x = x.to("cuda:0")
+        self.encoder_vq = self.encoder_vq.to("cuda:0")
+
         #with torch.no_grad():
         latents = self.encoder_vq.encode(x).mode()
+
+        latents = latents.to("cuda:1")
+        print("Device of latents:", latents.device)
         #latents = latents.detach()
         outs = []
         for i in range(self.refine_step):
@@ -99,9 +105,10 @@ class MetaPromptDepthEncoder(nn.Module):
                 c_crossattn = self.meta_prompts[None, :, :].expand(x.shape[0], -1, -1)
             t = getattr(self, f"t{i + 1}")
             t = t.repeat(x.shape[0], 1)
-            latents = self.unet(latents, t, c_crossattn=[c_crossattn])  
+            latents = self.unet(latents, t, c_crossattn=[c_crossattn])
             outs.append(latents)
         outs = outs[-1]
+
         x = torch.cat([self.layer1(outs[0]), self.layer2([outs[1]]), self.layer3([outs[2]]), self.layer4([outs[3]])], dim=1)
         out = self.out_layer(x)
         out = torch.einsum('bchw,bnc->bnhw', out, c_crossattn)
@@ -138,9 +145,13 @@ class MetaPromptDepth(nn.Module):
         # x = x[:, :, 4:, 4:]
         res_shape = ((h // 64 + self.resize_scale) * 64, (w // 64 + self.resize_scale) * 64)
         x = F.interpolate(x, size=res_shape, mode='bilinear', align_corners=False)
+        x = x.to("cuda:1")
 
         conv_feats = self.encoder(x)
+        conv_feats = conv_feats.to("cuda:1")
         conv_feats = F.interpolate(conv_feats, size=(h//8, w//8), mode='bilinear', align_corners=False)
+
+
 
         out = self.decoder([conv_feats])
         out = self.last_layer_depth(out)
