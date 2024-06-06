@@ -106,8 +106,9 @@ class MetaPromptsSeg(BaseSegmentor):
 
     def extract_feat(self, img):
         """Extract features from images."""
-        with torch.no_grad():
-            latents = self.encoder_vq.encode(img).mode().detach()
+        #with torch.no_grad():
+        latents = (self.encoder_vq.encode(img).mode())
+        #latents = latents.detach()
         for i in range(self.refine_step):
             if isinstance(latents, list):
                 latents = latents[0]

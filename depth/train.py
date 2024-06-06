@@ -112,6 +112,8 @@ def main():
     # CPU-GPU agnostic settings
     
     cudnn.benchmark = True
+
+    # Split model on gpus
     model.to(device)
     model_without_ddp = model
     #model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
@@ -150,11 +152,21 @@ def main():
 
     start_ep = 1
     if args.resume_from:
-        load_model(args.resume_from, model.module, optimizer)
-        strlength = len('_model.ckpt')
-        resume_ep = int(args.resume_from[-strlength-2:-strlength])
-        print(f'resumed from epoch {resume_ep}, ckpt {args.resume_from}')
-        start_ep = resume_ep + 1
+        # Check if model is wrapped with DataParallel or DistributedDataParallel
+        model_to_load = model.module if hasattr(model, 'module') else model
+
+        load_model(args.resume_from, model_to_load, optimizer)
+
+        # Assuming the filename format is something like "checkpoint_epoch_12_model.ckpt"
+        # This is more robust and doesn't rely on fixed positions
+        import re
+        match = re.search(r"_epoch_(\d+)_", args.resume_from)
+        if match:
+            resume_ep = int(match.group(1))
+            print(f'resumed from epoch {resume_ep}, ckpt {args.resume_from}')
+            start_ep = resume_ep + 1
+        else:
+            print("Could not extract epoch number from filename, starting from epoch 1")
     if args.auto_resume:
         ckpt_list = glob.glob(f'{log_dir}/epoch_*_model.ckpt')
         strlength = len('_model.ckpt')
@@ -284,7 +296,7 @@ def get_custom_lr(global_step, iterations, half_epoch, max_lr, min_lr):
 
 
 
-def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args):
+def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args, accumulation_steps=3):
     global global_step
     model.train()
     if args.rank == 0:
@@ -296,68 +308,49 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
     # Wrap the training loader with tqdm for a progress bar
     train_loader_tqdm = tqdm(enumerate(train_loader), total=iterations, desc=f"Epoch {epoch}/{args.epochs}")
 
+    optimizer.zero_grad()  # Initialize gradient accumulation
     for batch_idx, batch in train_loader_tqdm:
         global_step += 1
-
-        #current_lr = get_custom_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
         current_lr = get_exponential_decay_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
-
-
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr * param_group['lr_scale']
 
         input_RGB = batch['image'].to(device)
-
-        #visualize_image(input_RGB, index=0)
-
         depth_gt = batch['depth'].to(device)
-        #print(np.max(batch['depth'].numpy()[0]))
         mask = batch['mask'].to(device)
-        class_ids = None
-        if 'class_id' in batch:
-            class_ids = batch['class_id']
+        class_ids = batch.get('class_id', None)
         preds = model(input_RGB)
 
-        optimizer.zero_grad()
         pred_value = list(preds.values())
         loss_d = 0
-        # Iterate over your predictions if they are in a list or dict
         for pred in pred_value:
-            # Apply the mask: element-wise multiplication of the mask with the loss map
-            # The mask should be 1 for relevant pixels and 0 for irrelevant ones
             pred = pred.squeeze(dim=1) * mask
             depth_gt = depth_gt * mask
             unmasked_loss = criterion_d(pred, depth_gt)
-            masked_loss = unmasked_loss * mask  # Apply mask here
+            masked_loss = unmasked_loss * mask
             loss_d += masked_loss.sum()
-        # Normalize the loss by the number of predictions and by the sum of the mask values
-        # to account for the actual number of relevant pixels
         loss_d = loss_d / len(pred_value) / mask.sum()
-        # loss_d = criterion_d(preds['pred_d'].squeeze(dim=1), depth_gt)
+
+        # Scale loss to account for accumulation
+        loss_d = loss_d / accumulation_steps
+        loss_d.backward()
+
+        if (batch_idx + 1) % accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
 
         if args.rank == 0:
             depth_loss.update(loss_d.item(), input_RGB.size(0))
-
-        loss_d.backward()
-        optimizer.step()
-
-        if args.rank == 0:
-            # Update the progress bar
             train_loader_tqdm.set_postfix(
                 {'Depth Loss': f'{depth_loss.val:.4f} ({depth_loss.avg:.4f})', 'LR': f'{current_lr:.6f}'})
-
             if batch_idx % args.print_freq == 0:
-                result_line = 'Epoch: [{0}][{1}/{2}]\t' \
-                              'Loss: {loss}, LR: {lr}\n'.format(
-                    epoch, batch_idx, iterations,
-                    loss=depth_loss.avg, lr=current_lr
-                )
+                result_line = f'Epoch: [{epoch}][{batch_idx}/{iterations}]\tLoss: {depth_loss.avg}, LR: {current_lr}\n'
                 result_lines.append(result_line)
                 print(result_line)
 
     if args.rank == 0:
         with open(log_txt, 'a') as txtfile:
-            txtfile.write('\nEpoch: %03d - %03d' % (epoch, args.epochs))
+            txtfile.write(f'\nEpoch: {epoch:03d} - {args.epochs:03d}')
             for result_line in result_lines:
                 txtfile.write(result_line)
 

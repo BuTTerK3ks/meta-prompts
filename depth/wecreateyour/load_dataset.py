@@ -42,6 +42,21 @@ class ThreeDCDataset(Dataset):
             mask = np.load(mask_path)
             depth = np.load(depth_path)
 
+            # Create a mask initially set to 1
+            mask = np.ones_like(depth)
+
+            # Set mask to 0 where depth is smaller than 10
+            mask[depth < 10] = 0
+
+            # Convert mask to have the same number of channels as the image
+            # This expands the mask from (x, y) to (x, y, 3) by repeating the mask across the third dimension
+            mask = np.stack([mask] * 3, axis=-1)
+
+            # Apply the mask to the image and depth
+            image = image * mask
+            mask = mask[:, :, 0]
+            depth = depth * mask  # Use the first channel of the expanded mask for depth
+
             if self.resize_size:
                 # Resize while keeping aspect ratio
                 def resize_keep_aspect(image, target_size, fill_value=0):

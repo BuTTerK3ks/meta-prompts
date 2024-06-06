@@ -70,7 +70,7 @@ class MetaPromptDepthEncoder(nn.Module):
         del self.unet.unet.diffusion_model.time_embed
 
         for param in self.encoder_vq.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
@@ -80,9 +80,9 @@ class MetaPromptDepthEncoder(nn.Module):
 
     def forward(self, x):
         img = x
-        with torch.no_grad():
-            latents = self.encoder_vq.encode(x).mode()
-            latents = latents.detach()  
+        #with torch.no_grad():
+        latents = self.encoder_vq.encode(x).mode()
+        #latents = latents.detach()
         outs = []
         for i in range(self.refine_step):
             if isinstance(latents, list):
