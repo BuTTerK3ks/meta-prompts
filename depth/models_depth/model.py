@@ -26,6 +26,8 @@ class MetaPromptDepthEncoder(nn.Module):
         else:
             config.model.params.ckpt_path = f'../{sd_path}'
 
+        config.model.params.ckpt_path = None
+
         self.layer1 = nn.Sequential(
         nn.Conv2d(ldm_prior[0], ldm_prior[0], 3, stride=1, padding=1),
         nn.GroupNorm(16, ldm_prior[0]),
@@ -85,10 +87,9 @@ class MetaPromptDepthEncoder(nn.Module):
 
         #with torch.no_grad():
         latents = self.encoder_vq.encode(x).mode()
-
         latents = latents.to("cuda:1")
-        print("Device of latents:", latents.device)
         #latents = latents.detach()
+
         outs = []
         for i in range(self.refine_step):
             if isinstance(latents, list):
