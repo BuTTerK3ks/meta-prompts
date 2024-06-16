@@ -52,9 +52,15 @@ def load_model(ckpt, model, optimizer=None):
 
     model.load_state_dict(weights)
 
+    # Multi GPU
+    model.encoder_vq = model.encoder.encoder_vq.to("cuda:0")
+
+    # Old code:
     if optimizer is not None:
         optimizer_state = ckpt_dict['optimizer']
         optimizer.load_state_dict(optimizer_state)
+
+
 
 
 def main():
@@ -198,7 +204,7 @@ def main():
         print('\nEpoch: %03d - %03d' % (epoch, args.epochs))
         loss_train = train(train_loader, model, criterion_d, log_txt, optimizer=optimizer, 
                            device=device, epoch=epoch, args=args)
-        if args.rank == 0:
+        if args.rank == 0 and loss_train is not None:
             writer.add_scalar('Training loss', loss_train, epoch)
 
         if epoch % args.val_freq == 0:

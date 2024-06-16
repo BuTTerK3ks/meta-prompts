@@ -21,12 +21,16 @@ class MetaPromptDepthEncoder(nn.Module):
                  ):
         super().__init__()
         config = OmegaConf.load('./v1-inference.yaml')
-        if sd_path is None:
-            config.model.params.ckpt_path = '../checkpoints/v1-5-pruned-emaonly.ckpt'
-        else:
-            config.model.params.ckpt_path = f'../{sd_path}'
 
-        config.model.params.ckpt_path = None
+        # Prevent loading if train not initialized
+        if args.resume_from is None:
+            print("Loading initial Stable Diffusion weights.")
+            if sd_path is None:
+                config.model.params.ckpt_path = '../checkpoints/v1-5-pruned-emaonly.ckpt'
+            else:
+                config.model.params.ckpt_path = f'../{sd_path}'
+            #config.model.params.ckpt_path = None
+
 
         self.layer1 = nn.Sequential(
         nn.Conv2d(ldm_prior[0], ldm_prior[0], 3, stride=1, padding=1),
@@ -73,6 +77,7 @@ class MetaPromptDepthEncoder(nn.Module):
 
         for param in self.encoder_vq.parameters():
             param.requires_grad = True
+
 
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
@@ -160,6 +165,17 @@ class MetaPromptDepth(nn.Module):
         out_dict = {'pred_d': out_depth}
 
         return out_dict
+
+    def save_checkpoint(self, filename='checkpoint.pth.tar', optimizer=None):
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        checkpoint = {
+            'model_state_dict': self.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict() if optimizer else None
+        }
+        torch.save(checkpoint, filename)
+        print(f"Checkpoint saved to {filename}")
 
 
 
