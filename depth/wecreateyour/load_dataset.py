@@ -3,6 +3,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import cv2
+from PIL import Image
+import matplotlib.pyplot as plt
+
 
 class ThreeDCDataset(Dataset):
     def __init__(self, data_path, ids, resize_size=(448, 576), is_train=True):
@@ -25,6 +28,9 @@ class ThreeDCDataset(Dataset):
         # Filter filenames based on split
         self.ids = ids
 
+        # Extensions for image
+        self.possible_extensions = ['.png', '.jpg', '.jpeg']
+
         print(f"Dataset initialized. {'Training' if is_train else 'Validation/Test'} mode. Total samples: {len(self.ids)}")
 
     def __len__(self):
@@ -33,20 +39,52 @@ class ThreeDCDataset(Dataset):
     def __getitem__(self, idx):
         base_filename = self.ids[idx]
         try:
-            image_path = os.path.join(self.data_path, 'image_numpy', base_filename + '.npy')
+            # Find the image file with the correct extension
+            image_path = None
+            for ext in self.possible_extensions:
+                potential_path = os.path.join(self.data_path, 'images', base_filename + ext)
+                if os.path.exists(potential_path):
+                    image_path = potential_path
+                    break
+
+            if image_path is None:
+                raise FileNotFoundError(
+                    f"No image file found for {base_filename} with extensions {self.possible_extensions}")
+
+            image_path_extracted = os.path.join(self.data_path, 'image_extracted', base_filename + '.png')
             mask_path = os.path.join(self.data_path, 'mask_numpy', base_filename + '.npy')
             depth_path = os.path.join(self.data_path, 'depth_numpy', base_filename + '.npy')
 
             # Load image, mask, and depth
-            image = np.load(image_path)
+            with Image.open(image_path) as img:
+                image = np.array(img)
             mask = np.load(mask_path)
             depth = np.load(depth_path)
+            with Image.open(image_path_extracted) as img:
+                image_extracted = np.array(img)
 
             # Create a mask initially set to 1
             mask = np.ones_like(depth)
 
             # Set mask to 0 where depth is smaller than 10
             mask[depth < 10] = 0
+
+            # Display the image
+            plt.imshow(image)
+            plt.title(f'Image: {base_filename}')
+            plt.show()
+
+            # Display the image
+            plt.imshow(mask)
+            plt.title(f'Mask: {base_filename}')
+            plt.show()
+
+            # Display the image
+            plt.imshow(image_extracted)
+            plt.title(f'Image Extracted: {base_filename}')
+            plt.show()
+
+            #TODO Maske zuschneiden
 
             # Convert mask to have the same number of channels as the image
             # This expands the mask from (x, y) to (x, y, 3) by repeating the mask across the third dimension
