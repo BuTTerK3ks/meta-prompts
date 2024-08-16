@@ -26,7 +26,6 @@ class DiceLoss(nn.Module):
         super(DiceLoss, self).__init__()
 
     def forward(self, preds, targets, smooth=1):
-        preds = torch.sigmoid(preds)  # Apply sigmoid to get probabilities
         preds = preds.view(-1)
         targets = targets.view(-1)
         intersection = (preds * targets).sum()
