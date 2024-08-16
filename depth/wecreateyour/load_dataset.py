@@ -21,9 +21,9 @@ class ThreeDCDataset(Dataset):
         self.is_train = is_train
 
         # List of filenames for images, masks, and depth
-        self.image_filenames = [f for f in os.listdir(os.path.join(data_path, 'image_numpy')) if f.endswith('.npy')]
-        self.mask_filenames = [f for f in os.listdir(os.path.join(data_path, 'mask_numpy')) if f.endswith('.npy')]
-        self.depth_filenames = [f for f in os.listdir(os.path.join(data_path, 'depth_numpy')) if f.endswith('.npy')]
+        #self.image_filenames = [f for f in os.listdir(os.path.join(data_path, 'image_numpy')) if f.endswith('.npy')]
+        #self.mask_filenames = [f for f in os.listdir(os.path.join(data_path, 'mask_numpy')) if f.endswith('.npy')]
+        #self.depth_filenames = [f for f in os.listdir(os.path.join(data_path, 'depth_numpy')) if f.endswith('.npy')]
 
         # Filter filenames based on split
         self.ids = ids
@@ -54,12 +54,14 @@ class ThreeDCDataset(Dataset):
             image_path_extracted = os.path.join(self.data_path, 'image_extracted', base_filename + '.png')
             mask_path = os.path.join(self.data_path, 'mask_numpy', base_filename + '.npy')
             depth_path = os.path.join(self.data_path, 'depth_numpy', base_filename + '.npy')
+            region_path = os.path.join(self.data_path, 'region', base_filename + '_region.pkl')
 
             # Load image, mask, and depth
             with Image.open(image_path) as img:
                 image = np.array(img)
             mask = np.load(mask_path)
             depth = np.load(depth_path)
+            region = np.load(region_path)
             with Image.open(image_path_extracted) as img:
                 image_extracted = np.array(img)
 
@@ -69,20 +71,19 @@ class ThreeDCDataset(Dataset):
             # Set mask to 0 where depth is smaller than 10
             mask[depth < 10] = 0
 
-            # Display the image
-            plt.imshow(image)
-            plt.title(f'Image: {base_filename}')
-            plt.show()
+            # Assuming image, mask, and image_extracted are numpy arrays (images)
+            # Ensure that all images have the same number of channels (convert to RGB if needed)
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            mask_rgb = cv2.cvtColor(mask, cv2.COLOR_BGR2RGB)
+            image_extracted_rgb = cv2.cvtColor(image_extracted, cv2.COLOR_BGR2RGB)
 
-            # Display the image
-            plt.imshow(mask)
-            plt.title(f'Mask: {base_filename}')
-            plt.show()
+            # Concatenate images horizontally
+            concatenated_image = cv2.hconcat([image_rgb, mask_rgb, image_extracted_rgb])
 
-            # Display the image
-            plt.imshow(image_extracted)
-            plt.title(f'Image Extracted: {base_filename}')
-            plt.show()
+            # Display the concatenated image
+            cv2.imshow(f'Images: {base_filename}', concatenated_image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
 
             #TODO Maske zuschneiden
 
@@ -136,3 +137,23 @@ class ThreeDCDataset(Dataset):
 
             print("Error loading file: " + str(base_filename))
             return self.__getitem__((idx + 1) % len(self))
+
+if __name__ == "__main__":
+    dataset_path = '/home/grannemann/Allgemein/Christian/LOOXIS/wecreateyour'
+    id = ["3067173"]
+
+
+    test_loader = ThreeDCDataset(dataset_path, id)
+
+    for batch_idx, batch in test_loader:
+        image = batch['image']
+        mask = batch['mask']
+        depth = batch['depth']
+
+        print("batch")
+
+
+
+
+
+    print("Ende")
