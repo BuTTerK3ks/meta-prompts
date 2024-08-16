@@ -207,6 +207,7 @@ def main():
         if args.rank == 0 and loss_train is not None:
             writer.add_scalar('Training loss', loss_train, epoch)
 
+        '''
         if epoch % args.val_freq == 0:
             results_dict, loss_val = validate(val_loader, model, criterion_d, 
                                               device=device, epoch=epoch, args=args)
@@ -241,6 +242,7 @@ def main():
                         'model': model_without_ddp.state_dict(),
                     },
                     os.path.join(log_dir, 'best.ckpt'))
+        '''
 
 def visualize_image(input_RGB, index=0):
     """
@@ -326,11 +328,13 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
     optimizer.zero_grad()  # Initialize gradient accumulation
     for batch_idx, batch in train_loader_tqdm:
+
         global_step += 1
         current_lr = get_exponential_decay_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr * param_group['lr_scale']
         device = "cuda:1"
+
 
         input_RGB = batch['image'].to(device)
         mask = batch['mask'].to(device)
@@ -346,6 +350,46 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
             unmasked_loss = criterion_d(pred, mask)
             loss_d += unmasked_loss.sum()
         loss_d = loss_d / len(pred_value)
+
+        # Uncomment the below block to visualize the image, mask, and masked image side by side
+        # '''
+        # Use the first prediction in the list for visualization
+
+        pred_vis = pred_value[0]
+
+        # Apply sigmoid and threshold to create a binary mask
+        pred_binary = (pred_vis >= 0.5).float()
+
+        # Move tensors back to CPU and convert to numpy arrays for visualization
+        input_image_vis = input_RGB[0].detach().permute(1, 2,
+                                                        0).cpu().numpy() * 255.0  # Convert from CHW to HWC and scale to [0, 255]
+        pred_binary_vis = pred_binary[
+                              0].detach().cpu().numpy() * 255  # Convert pred to binary mask and scale to [0, 255]
+
+        # Ensure the image is in the correct format (RGB)
+        input_image_vis = input_image_vis.astype(np.uint8)
+
+        # Convert pred_binary to 3 channels for visualization
+        pred_binary_rgb_vis = np.stack([pred_binary_vis] * 3, axis=-1).astype(np.uint8)
+
+        pred_binary_rgb_vis = pred_binary_rgb_vis.squeeze()
+
+        # Apply the binary mask to the image
+        masked_image_vis = cv2.bitwise_and(input_image_vis, pred_binary_rgb_vis)
+
+        # Concatenate the images side by side
+        concatenated_image_vis = cv2.hconcat([input_image_vis, pred_binary_rgb_vis, masked_image_vis])
+
+        # Display the concatenated image
+        cv2.imshow('Image | Prediction Mask | Masked Image', concatenated_image_vis)
+
+        cv2.waitKey(10)  # This allows the window to stay open and display the image while the training loop continues
+
+        # '''
+
+
+
+
 
         # Scale loss to account for accumulation
         loss_d = loss_d / accumulation_steps
@@ -366,13 +410,14 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
                 result_lines.append(result_line)
                 print(result_line)
 
-    if args.rank == 0:
-        with open(log_txt, 'a') as txtfile:
-            txtfile.write(f'\nEpoch: {epoch:03d} - {args.epochs:03d}')
-            for result_line in result_lines:
-                txtfile.write(result_line)
+        if args.rank == 0:
+            with open(log_txt, 'a') as txtfile:
+                txtfile.write(f'\nEpoch: {epoch:03d} - {args.epochs:03d}')
+                for result_line in result_lines:
+                    txtfile.write(result_line)
 
-    return loss_d
+        return loss_d
+
 
 
 def validate(val_loader, model, criterion_d, device, epoch, args):

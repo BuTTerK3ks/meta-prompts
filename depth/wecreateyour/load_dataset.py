@@ -48,10 +48,6 @@ class ThreeDCDataset(Dataset):
                     image_path = potential_path
                     break
 
-            if image_path is None:
-                raise FileNotFoundError(
-                    f"No image file found for {base_filename} with extensions {self.possible_extensions}")
-
             depth_path = os.path.join(self.data_path, 'depth_numpy', base_filename + '.npy')
             region_path = os.path.join(self.data_path, 'region', base_filename + '_region.pkl')
 
@@ -82,15 +78,23 @@ class ThreeDCDataset(Dataset):
             # Incorporate the cropped mask into the mask_in_image_dim using the region
             mask_in_image_dim[top_left_y:top_left_y + region_height, top_left_x:top_left_x + region_width] = scaled_mask
 
+            # Check if the mask dimensions are greater than 10x10
+            if mask_in_image_dim.shape[0] < 10 or mask_in_image_dim.shape[1] < 10:
+                print(f"Skipping {base_filename}: Mask dimensions are smaller than 10x10.")
+                return self.__getitem__(idx + 1)  # Recursively get the next item
+
+            # Convert from BGR to RGB if the image is loaded via OpenCV
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+            # Resize while keeping aspect ratio
             if self.resize_size:
-                # Resize while keeping aspect ratio
                 def resize_keep_aspect(image, target_size, fill_value=0):
                     ih, iw = image.shape[:2]  # Always take the first two dimensions (height and width)
                     th, tw = target_size
                     scale = min(tw / iw, th / ih)
 
-                    nw = int(iw * scale)
-                    nh = int(ih * scale)
+                    nw = round(iw * scale)
+                    nh = round(ih * scale)
 
                     image_resized = cv2.resize(image, (nw, nh))
 
@@ -113,32 +117,6 @@ class ThreeDCDataset(Dataset):
                 mask_in_image_dim = resize_keep_aspect(mask_in_image_dim, self.resize_size, fill_value=0)
                 mask_in_image_dim = mask_in_image_dim[:, :, 0]  # Ensure mask has a single channel
 
-            # Convert the final mask to have the same number of channels as the image
-            mask_rgb = np.stack([mask_in_image_dim] * 3, axis=-1)
-
-            # Apply the mask to the image
-            masked_image = image * mask_rgb
-
-            # Ensure all images are of the same data type
-            mask_rgb = mask_rgb * 255
-            mask_rgb = mask_rgb.astype(image.dtype)
-            masked_image = masked_image.astype(image.dtype)
-
-            # Convert to RGB if needed (depends on original image mode)
-            if image.shape[2] == 1:  # If grayscale, convert to RGB
-                image_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-            else:
-                image_rgb = image
-
-            # Visualization: Concatenate and display the images
-            concatenated_image = cv2.hconcat([image_rgb, mask_rgb, masked_image])
-            cv2.imshow(f'Images: {base_filename}', concatenated_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-    
-            #'''
-
-
             # Convert numpy arrays to PyTorch tensors
             image_tensor = torch.from_numpy(image).float() / 255.0  # Normalize image
             mask_tensor = torch.from_numpy(mask_in_image_dim).long()
@@ -151,10 +129,9 @@ class ThreeDCDataset(Dataset):
 
             return {'image': image_tensor, 'mask': mask_tensor, 'filename': base_filename}
 
-
         except Exception as e:
             print(f"Error processing {base_filename}: {e}")
-            raise
+            return None
 
 
 
