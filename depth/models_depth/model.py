@@ -14,6 +14,7 @@ from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer, c
 from omegaconf import OmegaConf
 from ldm.util import instantiate_from_config
 from meta_prompts.models import UNetWrapper, TextAdapterDepth
+import os
 
 class MetaPromptDepthEncoder(nn.Module):
     def __init__(self, args, out_dim=1024, ldm_prior=[320, 640, 1280, 1280], sd_path=None, text_dim=768, 
@@ -179,14 +180,16 @@ class MetaPromptDepth(nn.Module):
 
         conv_feats = F.interpolate(conv_feats, size=(h//8, w//8), mode='bilinear', align_corners=False)
 
-
-
-
-
         out = self.decoder([conv_feats])
         out = self.last_layer_depth(out)
-        out_depth = torch.sigmoid(out) * self.max_depth
+
+        # Apply sigmoid to get probabilities
+        out_depth = torch.sigmoid(out)
+
+        # Return the raw probability predictions for training
         out_dict = {'pred_d': out_depth}
+
+        return out_dict
 
         return out_dict
 

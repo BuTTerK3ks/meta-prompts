@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from models_depth.model import MetaPromptDepth
 from models_depth.optimizer import build_optimizers
 import utils_depth.metrics as metrics
-from utils_depth.criterion import SiLogLoss
+from utils_depth.criterion import SiLogLoss, DiceLoss
 import utils_depth.logging as logging
 
 from dataset.base_dataset import get_dataset
@@ -158,7 +158,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False, num_workers=4, prefetch_factor=5)
 
     # Training settings
-    criterion_d = SiLogLoss()
+    criterion_d = DiceLoss()
 
     optimizer = build_optimizers(model, dict(type='AdamW', lr=args.max_lr, betas=(0.9, 0.999), weight_decay=args.weight_decay,
                 constructor='LDMOptimizerConstructor',
@@ -319,6 +319,8 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
     iterations = len(train_loader)
     result_lines = []
 
+
+
     # Wrap the training loader with tqdm for a progress bar
     train_loader_tqdm = tqdm(enumerate(train_loader), total=iterations, desc=f"Epoch {epoch}/{args.epochs}")
 
@@ -331,23 +333,24 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
         device = "cuda:1"
 
         input_RGB = batch['image'].to(device)
-        depth_gt = batch['depth'].to(device)
         mask = batch['mask'].to(device)
-        class_ids = batch.get('class_id', None)
         preds = model(input_RGB)
 
+
+
         pred_value = list(preds.values())
+
+
         loss_d = 0
         for pred in pred_value:
-            pred = pred.squeeze(dim=1) * mask
-            depth_gt = depth_gt * mask
-            unmasked_loss = criterion_d(pred, depth_gt)
-            masked_loss = unmasked_loss * mask
-            loss_d += masked_loss.sum()
-        loss_d = loss_d / len(pred_value) / mask.sum()
+            unmasked_loss = criterion_d(pred, mask)
+            loss_d += unmasked_loss.sum()
+        loss_d = loss_d / len(pred_value)
 
         # Scale loss to account for accumulation
         loss_d = loss_d / accumulation_steps
+
+
         loss_d.backward()
 
         if (batch_idx + 1) % accumulation_steps == 0:
