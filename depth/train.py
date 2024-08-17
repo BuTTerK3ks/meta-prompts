@@ -202,12 +202,12 @@ def main():
     # Perform experiment
     for epoch in range(start_ep, args.epochs + 1):
         print('\nEpoch: %03d - %03d' % (epoch, args.epochs))
-        loss_train = train(train_loader, model, criterion_d, log_txt, optimizer=optimizer, 
+        loss_train = train(train_loader, model, criterion_d, log_txt, optimizer=optimizer,
                            device=device, epoch=epoch, args=args)
         if args.rank == 0 and loss_train is not None:
             writer.add_scalar('Training loss', loss_train, epoch)
 
-        '''
+
         if epoch % args.val_freq == 0:
             results_dict, loss_val = validate(val_loader, model, criterion_d, 
                                               device=device, epoch=epoch, args=args)
@@ -242,7 +242,7 @@ def main():
                         'model': model_without_ddp.state_dict(),
                     },
                     os.path.join(log_dir, 'best.ckpt'))
-        '''
+
 
 def visualize_image(input_RGB, index=0):
     """
@@ -312,7 +312,7 @@ def get_custom_lr(global_step, iterations, half_epoch, max_lr, min_lr):
 
 
 
-def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args, accumulation_steps=3):
+def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args, accumulation_steps=1):
     global global_step
     model.train()
     if args.rank == 0:
@@ -328,8 +328,13 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
     optimizer.zero_grad()  # Initialize gradient accumulation
     for batch_idx, batch in train_loader_tqdm:
-
         global_step += 1
+
+        if batch == 0:
+            print(f"Skipping batch {batch_idx} due to loading error.")
+            continue
+
+
         current_lr = get_exponential_decay_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr * param_group['lr_scale']
@@ -350,6 +355,9 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
             unmasked_loss = criterion_d(pred, mask)
             loss_d += unmasked_loss.sum()
         loss_d = loss_d / len(pred_value)
+
+
+
 
         # Uncomment the below block to visualize the image, mask, and masked image side by side
         # '''
@@ -391,12 +399,17 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
 
 
-        # Scale loss to account for accumulation
-        loss_d = loss_d / accumulation_steps
 
 
-        loss_d.backward()
+        # Check if loss exceeds the threshold and modify if necessary
+        if loss_d.item() < 1:
+            # Scale loss to account for accumulation
+            loss_d = loss_d / accumulation_steps
 
+            # Perform backpropagation if under 0.3
+            loss_d.backward()
+
+        # Perform optimization step after accumulating gradients
         if (batch_idx + 1) % accumulation_steps == 0:
             optimizer.step()
             optimizer.zero_grad()
@@ -410,20 +423,22 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
                 result_lines.append(result_line)
                 print(result_line)
 
-        if args.rank == 0:
-            with open(log_txt, 'a') as txtfile:
-                txtfile.write(f'\nEpoch: {epoch:03d} - {args.epochs:03d}')
-                for result_line in result_lines:
-                    txtfile.write(result_line)
 
-        return loss_d
+
+    if args.rank == 0:
+        with open(log_txt, 'a') as txtfile:
+            txtfile.write(f'\nEpoch: {epoch:03d} - {args.epochs:03d}')
+            for result_line in result_lines:
+                txtfile.write(result_line)
+
+    return loss_d
 
 
 
 def validate(val_loader, model, criterion_d, device, epoch, args):
 
     if args.rank == 0:
-        depth_loss = logging.AverageMeter()
+        seg_loss = logging.AverageMeter()
     model.eval()
 
     ddp_logger = utils.MetricLogger()
@@ -434,68 +449,35 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
 
     for batch_idx, batch in enumerate(val_loader):
         input_RGB = batch['image'].to(device)
-        depth_gt = batch['depth'].to(device)
         mask = batch['mask'].to(device)
         filename = batch['filename'][0]
-        class_id = None
-        if 'class_id' in batch:
-            class_id = batch['class_id']
 
         with torch.no_grad():
-            if args.shift_window_test:
-                bs, _, h, w = input_RGB.shape
-                assert w > h and bs == 1
-                interval_all = w - h
-                interval = interval_all // (args.shift_size-1)
-                sliding_images = []
-                sliding_masks = torch.zeros((bs, 1, h, w), device=input_RGB.device)
-                class_ids = []
-                for i in range(args.shift_size):
-                    sliding_images.append(input_RGB[..., :, i*interval:i*interval+h])
-                    sliding_masks[..., :, i*interval:i*interval+h] += 1
-                    class_ids.append(class_id)
-                input_RGB = torch.cat(sliding_images, dim=0)
-                if class_id is not None:
-                    class_ids = torch.cat(class_ids, dim=0)
-            if args.flip_test:
-                input_RGB = torch.cat((input_RGB, torch.flip(input_RGB, [3])), dim=0)
-                if class_id is not None:
-                    class_ids = torch.cat((class_ids, class_ids), dim=0)
             pred = model(input_RGB)
         pred_value = list(pred.values())
-        pred_d = pred_value[-1]
+        prediction = pred_value[-1]
         # pred_d = pred['pred_d']
-        if args.flip_test:
-            batch_s = pred_d.shape[0]//2
-            pred_d = (pred_d[:batch_s] + torch.flip(pred_d[batch_s:], [3]))/2.0
-        if args.shift_window_test:
-            pred_s = torch.zeros((bs, 1, h, w), device=pred_d.device)
-            for i in range(args.shift_size):
-                pred_s[..., :, i*interval:i*interval+h] += pred_d[i:i+1]
-            pred_d = pred_s/sliding_masks
 
-        pred_d = pred_d * mask
-        depth_gt = depth_gt * mask
+        prediction = prediction
+        ground_truth = mask
 
-        pred_d = pred_d.squeeze()
-        depth_gt = depth_gt.squeeze()
+        prediction = prediction.squeeze()
+        ground_truth = ground_truth.squeeze()
 
 
 
-        unmasked_loss = criterion_d(pred_d.squeeze(), depth_gt)
-        masked_loss = unmasked_loss * mask  # Apply mask here
-        masked_loss = masked_loss.sum()
-        loss_d = masked_loss / len(pred_value) / mask.sum()
+        unmasked_loss = criterion_d(prediction, ground_truth)
+        unmasked_loss = unmasked_loss.sum()
+        loss_d = unmasked_loss / len(pred_value)
 
 
 
         ddp_logger.update(loss_d=loss_d.item())
 
         if args.rank == 0:
-            depth_loss.update(loss_d.item(), input_RGB.size(0))
+            seg_loss.update(loss_d.item(), input_RGB.size(0))
 
-        pred_crop, gt_crop = metrics.cropping_img(args, pred_d, depth_gt, mask)
-        computed_result = metrics.eval_depth(pred_crop, gt_crop)
+        computed_result = metrics.eval_depth(prediction, ground_truth)
 
         if args.rank == 0:
             save_path = os.path.join(result_dir, filename)
@@ -503,7 +485,7 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
 
             if args.save_result:
                 # Convert the tensor to a NumPy array
-                pred_d_numpy = pred_d.cpu().numpy()
+                pred_d_numpy = prediction.cpu().numpy()
 
                 pred_d_numpy = pred_d_numpy
 
@@ -511,7 +493,7 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
                 np.save(save_path, pred_d_numpy)
                     
         if args.rank == 0:
-            loss_d = depth_loss.avg
+            loss_d = seg_loss.avg
             if args.pro_bar:
                 logging.progress_bar(batch_idx, len(val_loader), args.epochs, epoch)
 
