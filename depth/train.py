@@ -311,7 +311,6 @@ def get_custom_lr(global_step, iterations, half_epoch, max_lr, min_lr):
     return current_lr
 
 
-
 def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, args, accumulation_steps=1):
     global global_step
     model.train()
@@ -321,10 +320,10 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
     iterations = len(train_loader)
     result_lines = []
 
-
+    skip_count = 0  # Initialize skip counter
 
     # Wrap the training loader with tqdm for a progress bar
-    train_loader_tqdm = tqdm(enumerate(train_loader), total=iterations, desc=f"Epoch {epoch}/{args.epochs}")
+    train_loader_tqdm = tqdm(enumerate(train_loader), total=iterations, desc=f"Epoch {epoch}/{args.epochs} [Skipped: {skip_count}]")
 
     optimizer.zero_grad()  # Initialize gradient accumulation
     for batch_idx, batch in train_loader_tqdm:
@@ -332,74 +331,26 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
         if batch == 0:
             print(f"Skipping batch {batch_idx} due to loading error.")
+            skip_count += 1  # Increment the skip counter
+            train_loader_tqdm.set_description(f"Epoch {epoch}/{args.epochs} [Skipped: {skip_count}]")  # Update tqdm description
             continue
-
 
         current_lr = get_exponential_decay_lr(global_step, iterations, half_epoch, args.max_lr, args.min_lr)
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr * param_group['lr_scale']
         device = "cuda:1"
 
-
         input_RGB = batch['image'].to(device)
         mask = batch['mask'].to(device)
         preds = model(input_RGB)
 
-
-
         pred_value = list(preds.values())
-
 
         loss_d = 0
         for pred in pred_value:
             unmasked_loss = criterion_d(pred, mask)
             loss_d += unmasked_loss.sum()
         loss_d = loss_d / len(pred_value)
-
-
-
-
-        # Uncomment the below block to visualize the image, mask, and masked image side by side
-        # '''
-        # Use the first prediction in the list for visualization
-
-        pred_vis = pred_value[0]
-
-        # Apply sigmoid and threshold to create a binary mask
-        pred_binary = (pred_vis >= 0.5).float()
-
-        # Move tensors back to CPU and convert to numpy arrays for visualization
-        input_image_vis = input_RGB[0].detach().permute(1, 2,
-                                                        0).cpu().numpy() * 255.0  # Convert from CHW to HWC and scale to [0, 255]
-        pred_binary_vis = pred_binary[
-                              0].detach().cpu().numpy() * 255  # Convert pred to binary mask and scale to [0, 255]
-
-        # Ensure the image is in the correct format (RGB)
-        input_image_vis = input_image_vis.astype(np.uint8)
-
-        # Convert pred_binary to 3 channels for visualization
-        pred_binary_rgb_vis = np.stack([pred_binary_vis] * 3, axis=-1).astype(np.uint8)
-
-        pred_binary_rgb_vis = pred_binary_rgb_vis.squeeze()
-
-        # Apply the binary mask to the image
-        masked_image_vis = cv2.bitwise_and(input_image_vis, pred_binary_rgb_vis)
-
-        # Concatenate the images side by side
-        concatenated_image_vis = cv2.hconcat([input_image_vis, pred_binary_rgb_vis, masked_image_vis])
-
-        # Display the concatenated image
-        cv2.imshow('Image | Prediction Mask | Masked Image', concatenated_image_vis)
-
-        cv2.waitKey(10)  # This allows the window to stay open and display the image while the training loop continues
-
-        # '''
-
-
-
-
-
-
 
         # Check if loss exceeds the threshold and modify if necessary
         if loss_d.item() < 1:
@@ -423,8 +374,6 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
                 result_lines.append(result_line)
                 print(result_line)
 
-
-
     if args.rank == 0:
         with open(log_txt, 'a') as txtfile:
             txtfile.write(f'\nEpoch: {epoch:03d} - {args.epochs:03d}')
@@ -432,7 +381,6 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
                 txtfile.write(result_line)
 
     return loss_d
-
 
 
 def validate(val_loader, model, criterion_d, device, epoch, args):
@@ -447,69 +395,56 @@ def validate(val_loader, model, criterion_d, device, epoch, args):
     for metric in metric_name:
         result_metrics[metric] = 0.0
 
-    for batch_idx, batch in enumerate(val_loader):
-        input_RGB = batch['image'].to(device)
-        mask = batch['mask'].to(device)
-        filename = batch['filename'][0]
+    print("VALIDATION =========================================================================================")
+    iterations = len(val_loader)
+    failure_count = 0  # Initialize failure counter
 
-        with torch.no_grad():
-            pred = model(input_RGB)
-        pred_value = list(pred.values())
-        prediction = pred_value[-1]
-        # pred_d = pred['pred_d']
+    val_loader_tqdm = tqdm(enumerate(val_loader), total=iterations,
+                           desc=f"Epoch {epoch}/{args.epochs} [Failures: {failure_count}]")
 
-        prediction = prediction
-        ground_truth = mask
+    for batch_idx, batch in val_loader_tqdm:
+        try:
+            input_RGB = batch['image'].to("cuda:1")
+            mask = batch['mask'].to("cuda:1")
+            filename = batch['filename'][0]
 
-        prediction = prediction.squeeze()
-        ground_truth = ground_truth.squeeze()
+            with torch.no_grad():
+                pred = model(input_RGB)
+            pred_value = list(pred.values())
+            prediction = pred_value[-1]
 
+            prediction = prediction.squeeze()
+            ground_truth = mask.squeeze()
 
+            unmasked_loss = criterion_d(prediction, ground_truth)
+            unmasked_loss = unmasked_loss.sum()
+            loss_d = unmasked_loss / len(pred_value)
 
-        unmasked_loss = criterion_d(prediction, ground_truth)
-        unmasked_loss = unmasked_loss.sum()
-        loss_d = unmasked_loss / len(pred_value)
+            ddp_logger.update(loss_d=loss_d.item())
 
+            if args.rank == 0:
+                seg_loss.update(loss_d.item(), input_RGB.size(0))
 
+            if args.rank == 0:
+                save_path = os.path.join(result_dir, filename)
+                save_path = save_path + '.npy'  # Ensuring the file is saved with .npy extension
 
-        ddp_logger.update(loss_d=loss_d.item())
+                if args.save_result:
+                    pred_d_numpy = prediction.cpu().numpy()
+                    np.save(save_path, pred_d_numpy)
 
-        if args.rank == 0:
-            seg_loss.update(loss_d.item(), input_RGB.size(0))
+            if args.rank == 0:
+                loss_d = seg_loss.avg
+                if args.pro_bar:
+                    logging.progress_bar(batch_idx, len(val_loader), args.epochs, epoch)
 
-        computed_result = metrics.eval_depth(prediction, ground_truth)
+        except Exception as e:
+            failure_count += 1  # Increment the failure counter
+            val_loader_tqdm.set_description(f"Epoch {epoch}/{args.epochs} [Failures: {failure_count}]")
+            continue
 
-        if args.rank == 0:
-            save_path = os.path.join(result_dir, filename)
-            save_path = save_path + '.npy'  # Ensuring the file is saved with .npy extension
-
-            if args.save_result:
-                # Convert the tensor to a NumPy array
-                pred_d_numpy = prediction.cpu().numpy()
-
-                pred_d_numpy = pred_d_numpy
-
-                # Save the NumPy array to a .npy file
-                np.save(save_path, pred_d_numpy)
-                    
-        if args.rank == 0:
-            loss_d = seg_loss.avg
-            if args.pro_bar:
-                logging.progress_bar(batch_idx, len(val_loader), args.epochs, epoch)
-
-        ddp_logger.update(**computed_result)
-        for key in result_metrics.keys():
-            result_metrics[key] += computed_result[key]
-
-    # for key in result_metrics.keys():
-    #     result_metrics[key] = result_metrics[key] / (batch_idx + 1)
 
     ddp_logger.synchronize_between_processes()
-
-    for key in result_metrics.keys():
-        result_metrics[key] = ddp_logger.meters[key].global_avg
-
-    loss_d = ddp_logger.meters['loss_d'].global_avg
 
     return result_metrics, loss_d
 

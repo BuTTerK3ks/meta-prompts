@@ -80,7 +80,6 @@ class ThreeDCDataset(Dataset):
 
             # Check if the mask dimensions are greater than 10x10
             if mask_in_image_dim.shape[0] < 10 or mask_in_image_dim.shape[1] < 10:
-                print(f"Skipping {base_filename}: Mask dimensions are smaller than 10x10.")
                 return 0
 
             # Convert from BGR to RGB if the image is loaded via OpenCV
@@ -131,7 +130,6 @@ class ThreeDCDataset(Dataset):
 
 
         except Exception as e:
-            print(f"Error processing {base_filename}: {e}")
             return 0
 
 
