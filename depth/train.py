@@ -352,6 +352,47 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
             loss_d += unmasked_loss.sum()
         loss_d = loss_d / len(pred_value)
 
+
+
+        # Uncomment the below block to visualize the image, mask, and masked image side by side
+        # '''
+        # Use the first prediction in the list for visualization
+
+        pred_vis = pred_value[0]
+
+        # Apply sigmoid and threshold to create a binary mask
+        pred_binary = (pred_vis >= 0.5).float()
+
+        # Move tensors back to CPU and convert to numpy arrays for visualization
+        input_image_vis = input_RGB[0].detach().permute(1, 2,
+                                                        0).cpu().numpy() * 255.0  # Convert from CHW to HWC and scale to [0, 255]
+        pred_binary_vis = pred_binary[
+                              0].detach().cpu().numpy() * 255  # Convert pred to binary mask and scale to [0, 255]
+
+        # Ensure the image is in the correct format (RGB)
+        input_image_vis = input_image_vis.astype(np.uint8)
+
+        # Convert pred_binary to 3 channels for visualization
+        pred_binary_rgb_vis = np.stack([pred_binary_vis] * 3, axis=-1).astype(np.uint8)
+
+        pred_binary_rgb_vis = pred_binary_rgb_vis.squeeze()
+
+        # Apply the binary mask to the image
+        masked_image_vis = cv2.bitwise_and(input_image_vis, pred_binary_rgb_vis)
+
+        # Concatenate the images side by side
+        concatenated_image_vis = cv2.hconcat([input_image_vis, pred_binary_rgb_vis, masked_image_vis])
+
+        # Display the concatenated image
+        cv2.imshow('Image | Prediction Mask | Masked Image', concatenated_image_vis)
+
+        cv2.waitKey(2)  # This allows the window to stay open and display the image while the training loop continues
+
+        # '''
+
+
+
+
         # Check if loss exceeds the threshold and modify if necessary
         if loss_d.item() < 1:
             # Scale loss to account for accumulation
