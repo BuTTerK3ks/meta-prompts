@@ -330,7 +330,6 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
         global_step += 1
 
         if batch == 0:
-            print(f"Skipping batch {batch_idx} due to loading error.")
             skip_count += 1  # Increment the skip counter
             train_loader_tqdm.set_description(f"Epoch {epoch}/{args.epochs} [Skipped: {skip_count}]")  # Update tqdm description
             continue
@@ -355,7 +354,7 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
 
         # Uncomment the below block to visualize the image, mask, and masked image side by side
-        # '''
+        '''
         # Use the first prediction in the list for visualization
 
         pred_vis = pred_value[0]
@@ -388,7 +387,7 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
         cv2.waitKey(2)  # This allows the window to stay open and display the image while the training loop continues
 
-        # '''
+        '''
 
 
 

@@ -17,7 +17,7 @@ from meta_prompts.models import UNetWrapper, TextAdapterDepth
 import os
 
 class MetaPromptDepthEncoder(nn.Module):
-    def __init__(self, args, out_dim=1024, ldm_prior=[320, 640, 1280, 1280], sd_path=None, text_dim=768, 
+    def __init__(self, args, out_dim=1024, ldm_prior=[320, 640, 1280, 1280], sd_path=None, text_dim=768,
                  dataset='kitti', num_prompt=50
                  ):
         super().__init__()
@@ -47,6 +47,7 @@ class MetaPromptDepthEncoder(nn.Module):
             nn.GroupNorm(16, text_dim),
             nn.ReLU(),
         )
+
         self.apply(self._init_weights)
 
         sd_model = instantiate_from_config(config.model)
@@ -68,9 +69,10 @@ class MetaPromptDepthEncoder(nn.Module):
                 setattr(self, f"text_adapter{i + 1}", text_adapter)
         if self.share_meta_prompts:
             self.meta_prompts = nn.Parameter(torch.randn(num_prompt, text_dim), requires_grad=True)
-        
-        ### stable diffusion layers 
+
+        ### stable diffusion layers
         self.encoder_vq = sd_model.first_stage_model
+
         self.unet = UNetWrapper(sd_model.model, use_attn=False)
         del sd_model.cond_stage_model
         del self.encoder_vq.decoder
@@ -87,8 +89,8 @@ class MetaPromptDepthEncoder(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self, x):
-        img = x
 
+        # Change GPU
         x = x.to("cuda:0")
         self.encoder_vq = self.encoder_vq.to("cuda:0")
 
@@ -108,41 +110,30 @@ class MetaPromptDepthEncoder(nn.Module):
                 meta_prompts = getattr(self, f"meta_prompts{i + 1}")
                 # c_crossattn = meta_prompts[None, :, :].expand(x.shape[0], -1, -1)
                 text_adapter = getattr(self, f"text_adapter{i + 1}")
-                c_crossattn = text_adapter(latents, meta_prompts) 
+                c_crossattn = text_adapter(latents, meta_prompts)
             else:
                 c_crossattn = self.meta_prompts[None, :, :].expand(x.shape[0], -1, -1)
             t = getattr(self, f"t{i + 1}")
             t = t.repeat(x.shape[0], 1)
 
-            '''
-            self.unet = self.unet.to("cuda:0")
-            if isinstance(latents, list):
-                latents = [latent.to("cuda:0") for latent in latents]
-            else:
-                latents = latents.to("cuda:0")
-
-            t = t.to("cuda:0")
-            c_crossattn = c_crossattn.to("cuda:0")
-            '''
-
+            self.unet = self.unet
             latents = self.unet(latents, t, c_crossattn=[c_crossattn])
-
-            '''
-            if isinstance(latents, list):
-                latents = [latent.to("cuda:1") for latent in latents]
-            else:
-                latents = latents.to("cuda:1")
-            t = t.to("cuda:1")
-            c_crossattn = c_crossattn.to("cuda:1")
-            '''
 
             outs.append(latents)
         outs = outs[-1]
 
         x = torch.cat([self.layer1(outs[0]), self.layer2([outs[1]]), self.layer3([outs[2]]), self.layer4([outs[3]])], dim=1)
+
+        # Change GPU
+        self.out_layer = self.out_layer.to("cuda:0")
+        x = x.to("cuda:0")
+        c_crossattn = c_crossattn.to("cuda:0")
+
+
         out = self.out_layer(x)
         out = torch.einsum('bchw,bnc->bnhw', out, c_crossattn)
-        return out
+
+        return out.to("cuda:1")
 
 class MetaPromptDepth(nn.Module):
     def __init__(self, args=None):
