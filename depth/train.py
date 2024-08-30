@@ -169,7 +169,9 @@ def main():
         # Check if model is wrapped with DataParallel or DistributedDataParallel
         model_to_load = model.module if hasattr(model, 'module') else model
 
-        load_model(args.resume_from, model_to_load, optimizer)
+        # TODO Change BACK!
+        load_model(args.resume_from, model_to_load)
+        #load_model(args.resume_from, model_to_load, optimizer)
 
         # Assuming the filename format is something like "checkpoint_epoch_12_model.ckpt"
         # This is more robust and doesn't rely on fixed positions
@@ -340,6 +342,10 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
         device = "cuda:1"
 
         input_RGB = batch['image'].to(device)
+
+        a = np.max(input_RGB.detach().cpu().numpy())
+        b = np.min(input_RGB.detach().cpu().numpy())
+
         mask = batch['mask'].to(device)
         preds = model(input_RGB)
 
@@ -354,7 +360,7 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
 
         # Uncomment the below block to visualize the image, mask, and masked image side by side
-        '''
+        #'''
         # Use the first prediction in the list for visualization
 
         pred_vis = pred_value[0]
@@ -387,7 +393,7 @@ def train(train_loader, model, criterion_d, log_txt, optimizer, device, epoch, a
 
         cv2.waitKey(2)  # This allows the window to stay open and display the image while the training loop continues
 
-        '''
+        #'''
 
 
 
